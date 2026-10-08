@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList, TextItem, ReaderSettings } from '../types';
 import { getTexts, updateTextProgress, getSettings, saveSettings } from '../store/storage';
 import SettingsModal from '../components/SettingsModal';
+import WordPickerModal from '../components/WordPickerModal';
 
 type ReaderRouteProp = RouteProp<RootStackParamList, 'Reader'>;
 
@@ -285,33 +286,17 @@ export default function ReaderScreen() {
       </View>
 
       {/* FULL TEXT PICKER MODAL */}
-      <Modal visible={pickerModalVisible} animationType="slide" presentationStyle="pageSheet">
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Select Start Position</Text>
-            <TouchableOpacity onPress={() => setPickerModalVisible(false)}>
-              <Text style={styles.closeBtn}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={styles.fullTextScrollView}>
-            <View style={styles.fullTextWrapper}>
-              {text.words.map((word, index) => (
-                <TouchableOpacity 
-                  key={index} 
-                  onPress={() => {
-                    setCurrentIndex(index);
-                    setPickerModalVisible(false);
-                  }}
-                >
-                  <Text style={[styles.pickerWord, currentIndex === index && styles.pickerWordActive]}>
-                    {word}{' '}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+      <WordPickerModal
+        visible={pickerModalVisible}
+        content={text.content}
+        words={text.words}
+        currentIndex={currentIndex}
+        onSelectWord={(index) => {
+          setCurrentIndex(index);
+          setPickerModalVisible(false);
+        }}
+        onClose={() => setPickerModalVisible(false)}
+      />
 
       {/* SETTINGS MODAL */}
       <SettingsModal
@@ -464,42 +449,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#F2F2F7',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderColor: '#ccc',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  closeBtn: {
-    color: '#007AFF',
-    fontSize: 16,
-  },
-  fullTextScrollView: {
-    padding: 15,
-  },
-  fullTextWrapper: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  pickerWord: {
-    fontSize: 18,
-    lineHeight: 30,
-    color: '#333',
-  },
-  pickerWordActive: {
-    backgroundColor: '#007AFF',
-    color: '#FFF',
-    borderRadius: 5,
-    overflow: 'hidden',
-  }
 });
