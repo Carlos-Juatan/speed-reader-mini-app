@@ -13,7 +13,8 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "^5.10.1",
-    "react-native-screens": "^4.28.0"
+    "react-native-screens": "^4.28.0",
+    "expo-keep-awake": "~57.0.2"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

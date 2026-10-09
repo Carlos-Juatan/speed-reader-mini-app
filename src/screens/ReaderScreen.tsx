@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { RootStackParamList, TextItem, ReaderSettings } from '../types';
 import { getTexts, updateTextProgress, getSettings, saveSettings } from '../store/storage';
 import SettingsModal from '../components/SettingsModal';
@@ -23,12 +24,19 @@ export default function ReaderScreen() {
   const [wpm, setWpm] = useState(300);
   const [wordsPerChunk, setWordsPerChunk] = useState(1);
   const [timeRemaining, setTimeRemaining] = useState(0); // in seconds
+  const [initialTimerSeconds, setInitialTimerSeconds] = useState(0); // to know what to reset to
   
   const [pickerModalVisible, setPickerModalVisible] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
 
   const playIntervalRef = useRef<any>(null);
   const timerIntervalRef = useRef<any>(null);
+  const timeRemainingRef = useRef(0);
+
+  // Keep timeRemainingRef in sync
+  useEffect(() => {
+    timeRemainingRef.current = timeRemaining;
+  }, [timeRemaining]);
 
   // Load data
   useEffect(() => {
@@ -47,7 +55,9 @@ export default function ReaderScreen() {
       setSettings(defaultSettings);
       setWpm(defaultSettings.wpm);
       setWordsPerChunk(defaultSettings.wordsPerChunk);
-      setTimeRemaining(defaultSettings.timerMinutes * 60);
+      const timerSecs = defaultSettings.timerMinutes * 60;
+      setTimeRemaining(timerSecs);
+      setInitialTimerSeconds(timerSecs);
     };
     init();
   }, [textId]);
@@ -59,15 +69,27 @@ export default function ReaderScreen() {
     }
   }, [text, currentIndex]);
 
+  // Save progress whenever currentIndex changes (via saveProgress dependency)
+  // Interval cleanup is handled by each interval's own useEffect
   useEffect(() => {
     return () => {
       saveProgress();
-      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, [saveProgress]);
 
-  // Handle Play/Pause logic
+  // Keep screen awake while playing
+  useEffect(() => {
+    if (isPlaying) {
+      activateKeepAwakeAsync('reader-session').catch(() => {});
+    } else {
+      deactivateKeepAwake('reader-session');
+    }
+    return () => {
+      deactivateKeepAwake('reader-session');
+    };
+  }, [isPlaying]);
+
+  // Handle Play/Pause logic — word advancing
   useEffect(() => {
     if (isPlaying && text) {
       const intervalMs = (60 / wpm) * wordsPerChunk * 1000;
@@ -91,31 +113,44 @@ export default function ReaderScreen() {
           return nextIndex;
         });
       }, intervalMs);
-
-      // Session Timer logic
-      if (settings?.timerMinutes && settings.timerMinutes > 0 && timeRemaining > 0) {
-        timerIntervalRef.current = setInterval(() => {
-          setTimeRemaining(prev => {
-            if (prev <= 1) {
-              setIsPlaying(false);
-              Alert.alert('Time is up!', 'Your reading session has finished.');
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
-      }
     } else {
       if (playIntervalRef.current) clearInterval(playIntervalRef.current);
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       saveProgress();
     }
 
     return () => {
       if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+    };
+  }, [isPlaying, wpm, wordsPerChunk, text, saveProgress]);
+
+  // Handle timer countdown — separate from word advancing
+  useEffect(() => {
+    if (isPlaying && settings && settings.timerMinutes > 0 && timeRemainingRef.current > 0) {
+      timerIntervalRef.current = setInterval(() => {
+        setTimeRemaining(prev => {
+          if (prev <= 1) {
+            setIsPlaying(false);
+            Alert.alert('Time is up!', 'Your reading session has finished.');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    }
+
+    return () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
-  }, [isPlaying, wpm, wordsPerChunk, text, settings, saveProgress]);
+    // Note: timeRemaining is intentionally NOT in the deps — we use a ref instead
+    // to prevent re-creating the interval every tick
+  }, [isPlaying, settings]);
+
+  const handleResetTimer = () => {
+    setIsPlaying(false);
+    setTimeRemaining(initialTimerSeconds);
+  };
 
   if (!text || !settings) return <SafeAreaView style={styles.container}><Text style={{color: 'white'}}>Loading...</Text></SafeAreaView>;
 
@@ -223,6 +258,14 @@ export default function ReaderScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* RESET TIMER BUTTON */}
+      {settings.timerMinutes > 0 && (
+        <TouchableOpacity style={styles.resetTimerButton} onPress={handleResetTimer}>
+          <Ionicons name="refresh" size={16} color="#aaa" />
+          <Text style={styles.resetTimerText}>Reset Timer</Text>
+        </TouchableOpacity>
+      )}
+
       {/* RSVP DISPLAY AREA */}
       <View style={styles.displayArea}>
         <View style={styles.notchTop} />
@@ -308,7 +351,9 @@ export default function ReaderScreen() {
           setWpm(newSettings.wpm);
           setWordsPerChunk(newSettings.wordsPerChunk);
           if (newSettings.timerMinutes !== settings.timerMinutes) {
-            setTimeRemaining(newSettings.timerMinutes * 60);
+            const newTimerSecs = newSettings.timerMinutes * 60;
+            setTimeRemaining(newTimerSecs);
+            setInitialTimerSeconds(newTimerSecs);
           }
           await saveSettings(newSettings);
           setSettingsModalVisible(false);
@@ -334,6 +379,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  resetTimerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 14,
+    gap: 5,
+  },
+  resetTimerText: {
+    color: '#aaa',
+    fontSize: 13,
+    fontWeight: '500',
   },
   displayArea: {
     flex: 1,

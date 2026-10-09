@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,7 @@ export const WordPickerModal: React.FC<WordPickerModalProps> = React.memo(({
   onClose,
 }) => {
   const flatListRef = useRef<FlatList<WordChunk>>(null);
+  const [shouldScrollToWord, setShouldScrollToWord] = useState(false);
 
   // Fecha no botão de voltar físico do Android
   useEffect(() => {
@@ -60,6 +61,13 @@ export const WordPickerModal: React.FC<WordPickerModalProps> = React.memo(({
       backHandlerSubscription.remove();
     };
   }, [visible, onClose]);
+
+  // When modal opens, mark that we need to scroll to current word
+  useEffect(() => {
+    if (visible) {
+      setShouldScrollToWord(true);
+    }
+  }, [visible]);
 
   // Agrupa as palavras em blocos pequenos (chunks) para renderização ultra-rápida via FlatList
   const chunks = useMemo<WordChunk[]>(() => {
@@ -124,15 +132,21 @@ export const WordPickerModal: React.FC<WordPickerModalProps> = React.memo(({
     return fallbackResult;
   }, [words, content]);
 
-  // Rola até o chunk atual ao abrir o modal
-  const onScrollToIndexFailed = useCallback((info: { index: number }) => {
+  // Scroll to the chunk containing the current word when modal opens
+  const onScrollToIndexFailed = useCallback((info: { index: number, highestMeasuredFrameIndex: number, averageItemLength: number }) => {
+    const offset = info.averageItemLength * info.index;
+    flatListRef.current?.scrollToOffset({ offset, animated: false });
     setTimeout(() => {
-      flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
+      try {
+        flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.3 });
+      } catch (e) {
+        // Ignora se ainda falhar
+      }
     }, 100);
   }, []);
 
   useEffect(() => {
-    if (visible && chunks.length > 0 && currentIndex > 0) {
+    if (visible && shouldScrollToWord && chunks.length > 0 && currentIndex > 0) {
       const targetChunkIndex = chunks.findIndex(chunk =>
         chunk.words.some(w => w.index === currentIndex)
       );
@@ -142,18 +156,36 @@ export const WordPickerModal: React.FC<WordPickerModalProps> = React.memo(({
           try {
             flatListRef.current?.scrollToIndex({
               index: targetChunkIndex,
-              animated: false,
+              animated: true,
               viewPosition: 0.3,
             });
           } catch (e) {
             // Ignora falha inicial
           }
-        }, 60);
+          setShouldScrollToWord(false);
+        }, 150);
 
         return () => clearTimeout(timer);
+      } else {
+        setShouldScrollToWord(false);
       }
     }
-  }, [visible, chunks, currentIndex]);
+  }, [visible, shouldScrollToWord, chunks, currentIndex]);
+
+  // Button to scroll to current word position
+  const handleGoToCurrentWord = useCallback(() => {
+    if (chunks.length === 0) return;
+    const targetChunkIndex = chunks.findIndex(chunk =>
+      chunk.words.some(w => w.index === currentIndex)
+    );
+    if (targetChunkIndex >= 0) {
+      flatListRef.current?.scrollToIndex({
+        index: targetChunkIndex,
+        animated: true,
+        viewPosition: 0.3,
+      });
+    }
+  }, [chunks, currentIndex]);
 
   const renderChunk = useCallback(({ item }: { item: WordChunk }) => {
     return (
@@ -226,8 +258,20 @@ export const WordPickerModal: React.FC<WordPickerModalProps> = React.memo(({
             windowSize={7}
             removeClippedSubviews={Platform.OS === 'android'}
             onScrollToIndexFailed={onScrollToIndexFailed}
+            showsVerticalScrollIndicator={true}
+            indicatorStyle="black"
           />
         )}
+
+        {/* Floating button to go to current word */}
+        <TouchableOpacity 
+          style={styles.goToCurrentButton}
+          onPress={handleGoToCurrentWord}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="locate" size={20} color="#fff" />
+          <Text style={styles.goToCurrentText}>Current Word</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     </Modal>
   );
@@ -276,6 +320,7 @@ const styles = StyleSheet.create({
   flatListContent: {
     paddingHorizontal: 18,
     paddingVertical: 14,
+    paddingBottom: 80,
   },
   chunkContainer: {
     marginBottom: 2,
@@ -296,5 +341,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     color: '#FFFFFF',
     fontWeight: 'bold',
+  },
+  goToCurrentButton: {
+    position: 'absolute',
+    bottom: 30,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    gap: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  goToCurrentText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
